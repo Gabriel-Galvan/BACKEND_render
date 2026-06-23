@@ -39,6 +39,10 @@ transferencia es: "el preprocesamiento en produccion debe ser idéntico
 al preprocesamiento usado en entrenamiento".
 """
 
+"""
+CAPA: INFRASTRUCTURE (Infraestructura) - Inteligencia Artificial
+"""
+
 import io
 import logging
 
@@ -51,8 +55,6 @@ from domain.repositories import ClasificadorCelular
 
 logger = logging.getLogger(__name__)
 
-# Orden de clases: debe coincidir con el orden alfabetico de carpetas
-# usado por Keras al entrenar (igual al de tu script original).
 ORDEN_CLASES: list[TipoCelula] = [
     TipoCelula.DISQUERATOSICAS,
     TipoCelula.KOILOCITOTICAS,
@@ -61,27 +63,21 @@ ORDEN_CLASES: list[TipoCelula] = [
     TipoCelula.SUPERFICIALES_INTERMEDIAS,
 ]
 
-TAMANO_ENTRADA = (224, 224)  # debe coincidir con el InputLayer del .h5 (batch_shape: [None, 224, 224, 3])
+# Corregido de 224x224 a 160x160 para coincidir con el modelo entrenado
+TAMANO_ENTRADA = (160, 160)
 
 
 class ClasificadorMobileNetV2(ClasificadorCelular):
     """
-    Carga el modelo `modelo_cancer_cervical.h5` UNA SOLA VEZ al iniciar
-    el servidor (en el constructor) y lo reutiliza en cada peticion.
-    Cargarlo en cada request seria muy lento y es un error comun.
+    Carga el modelo UNA SOLA VEZ al iniciar el servidor y lo reutiliza
+    en cada peticion.
     """
 
     def __init__(self, ruta_modelo: str):
-        # Import perezoso (lazy import) de TensorFlow: se importa aqui
-        # y no al inicio del archivo para que el resto del backend
-        # (rutas que no usan IA, tests, etc.) no dependa de tener
-        # TensorFlow instalado para arrancar.
         import tensorflow as tf
 
         self._tf = tf
         logger.info("Cargando modelo de IA desde %s ...", ruta_modelo)
-        # tf.keras.models.load_model soporta tanto .h5 como .keras nativo.
-        # El formato .keras (Keras 3) es el nuevo estandar a partir de TF 2.12+.
         self._modelo = tf.keras.models.load_model(ruta_modelo)
         logger.info("Modelo de IA cargado con exito.")
 
@@ -116,18 +112,9 @@ class ClasificadorMobileNetV2(ClasificadorCelular):
     def _preprocesar_imagen(self, imagen: Image.Image) -> np.ndarray:
         imagen = imagen.resize(TAMANO_ENTRADA)
         array_imagen = self._tf.keras.utils.img_to_array(imagen)
-        array_imagen = np.expand_dims(array_imagen, axis=0)  # forma (1, 224, 224, 3): un "lote" de 1 imagen
+        array_imagen = np.expand_dims(array_imagen, axis=0)  # (1, 160, 160, 3)
 
-        # PREPROCESAMIENTO: debe coincidir EXACTAMENTE con el usado al entrenar.
-        #
-        # El nuevo modelo (.keras, Fine-Tuning SPIaKMeD 93.43%) fue entrenado con
-        # ImageDataGenerator(rescale=1./255), que escala los pixeles al rango [0, 1].
-        # Por eso usamos division simple en lugar de mobilenet_v2.preprocess_input
-        # (que escalaria a [-1, 1] y produciria predicciones incorrectas).
-        #
-        # Si en el futuro cambias el modelo y fue entrenado con preprocess_input,
-        # reemplaza la linea de abajo por:
-        #   array_imagen = self._tf.keras.applications.mobilenet_v2.preprocess_input(array_imagen)
+        # El modelo fue entrenado con rescale=1./255
         array_imagen = array_imagen / 255.0
 
         return array_imagen
